@@ -74,14 +74,23 @@ namespace Terkoiz.Skipper
                     // This line will force any condition checker to pass, as the 'condition.value' field contains the "goal" of any quest condition
                     quest.ProgressCheckers[condition].SetCurrentValueGetter(_ => condition.value);
 
+                    // This only applies to SPT 4.0 because the `UnderlyingQuestControllerClassName` is no longer all lowercase, nor is it the same as the class name. It's now UpperAllLower instead of UpperUpperAllLower or AllLower.
+                    var spt400UnderlyingQuestControllerClassName = LowerCaseAllButFirst(UnderlyingQuestControllerClassName);
                     // We call 'SetConditionCurrentValue' to trigger all the code needed to make the condition completion appear visually in-game
-                    var conditionController = AccessTools.Field(questController.GetType(), $"{UnderlyingQuestControllerClassName.ToLowerInvariant()}_0").GetValue(questController);
+                    var conditionController = AccessTools.Field(questController.GetType(), $"{spt400UnderlyingQuestControllerClassName}_0").GetValue(questController);
                     AccessTools.DeclaredMethod(conditionController.GetType().BaseType, "SetConditionCurrentValue").Invoke(conditionController, new object[] { quest, EQuestStatus.AvailableForFinish, condition, condition.value, true });
 
                     skipButton.gameObject.SetActive(false);
                 },
                 cancelAction: () => {},
                 caption: "Confirmation"));
+        }
+
+        public static string LowerCaseAllButFirst(string input)
+        {
+            var firstCharacter = input[0];
+            var restOfString = input.Substring(1).ToLower();
+            return firstCharacter + restOfString;
         }
     }
 }
