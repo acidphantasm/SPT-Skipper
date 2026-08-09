@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System;
+using System.Linq;
 using System.Reflection;
 using SPT.Reflection.Patching;
 using EFT;
@@ -10,10 +11,13 @@ using UnityEngine;
 
 namespace Terkoiz.Skipper
 {
+    using Object=UnityEngine.Object;
+
     public class QuestObjectiveViewPatch : ModulePatch
     {
-        private static string UnderlyingQuestControllerClassName;
+        private static Type _underlyingQuestControllerType;
         internal static GameObject LastSeenObjectivesBlock;
+        
         
         protected override MethodBase GetTargetMethod()
         {
@@ -21,33 +25,17 @@ namespace Terkoiz.Skipper
         }
 
         [PatchPostfix]
-        private static void PatchPostfix([CanBeNull]DefaultUIButton ____handoverButton, AbstractQuestControllerClass questController, Condition condition, QuestClass quest, QuestObjectiveView __instance)
+        private static void PatchPostfix([CanBeNull]DefaultUIButton ____handoverButton, QuestController questController, Condition condition, Quest quest, QuestObjectiveView __instance)
         {
             if (!SkipperPlugin.ModEnabled.Value)
-            {
                 return;
-            }
 
             // The handover button is usually only missing in the non-trader task view screens, where we don't want to allow skipping either way
             if (____handoverButton == null)
-            {
                 return;
-            }
 
-            if (UnderlyingQuestControllerClassName == null)
-            {
-                var type = AccessTools.GetTypesFromAssembly(typeof(AbstractGame).Assembly)
-                    .SingleOrDefault(t => t.GetEvent("OnConditionQuestTimeExpired", BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance) != null);
-                
-                if (type == null)
-                {
-                    SkipperPlugin.Logger.LogError("Failed to locate a specific quest controller type");
-                    return;
-                }
-
-                UnderlyingQuestControllerClassName = type.Name.Split('`')[0];
-                SkipperPlugin.Logger.LogDebug($"Resolved {nameof(UnderlyingQuestControllerClassName)} to be {UnderlyingQuestControllerClassName}");
-            }
+            if (_underlyingQuestControllerType == null)
+                ResolveQuestControllerClass();
 
             LastSeenObjectivesBlock = __instance.transform.parent.gameObject;
 
@@ -74,11 +62,7 @@ namespace Terkoiz.Skipper
                     // This line will force any condition checker to pass, as the 'condition.value' field contains the "goal" of any quest condition
                     quest.ProgressCheckers[condition].SetCurrentValueGetter(_ => condition.value);
 
-                    // This only applies to SPT 4.0 because the `UnderlyingQuestControllerClassName` is no longer all lowercase, nor is it the same as the class name. It's now UpperAllLower instead of UpperUpperAllLower or AllLower.
-                    var spt400UnderlyingQuestControllerClassName = LowerCaseAllButFirst(UnderlyingQuestControllerClassName);
-                    // We call 'SetConditionCurrentValue' to trigger all the code needed to make the condition completion appear visually in-game
-                    var conditionController = AccessTools.Field(questController.GetType(), $"{spt400UnderlyingQuestControllerClassName}_0").GetValue(questController);
-                    AccessTools.DeclaredMethod(conditionController.GetType().BaseType, "SetConditionCurrentValue").Invoke(conditionController, new object[] { quest, EQuestStatus.AvailableForFinish, condition, condition.value, true });
+                    SetConditionCurrentValue(questController, quest, condition);
 
                     skipButton.gameObject.SetActive(false);
                 },
@@ -86,11 +70,52 @@ namespace Terkoiz.Skipper
                 caption: "Confirmation"));
         }
 
-        public static string LowerCaseAllButFirst(string input)
+        private static void ResolveQuestControllerClass()
         {
-            var firstCharacter = input[0];
-            var restOfString = input.Substring(1).ToLower();
-            return firstCharacter + restOfString;
+            _underlyingQuestControllerType = AccessTools.GetTypesFromAssembly(typeof(AbstractGame).Assembly)
+                .SingleOrDefault(t =>
+                    t.GetEvent(
+                    "OnConditionQuestTimeExpired",
+                    BindingFlags.DeclaredOnly |
+                    BindingFlags.Public |
+                    BindingFlags.Instance
+                    ) != null
+                );
+
+            if (_underlyingQuestControllerType == null)
+            {
+                SkipperPlugin.Logger.LogError("Failed to locate ConditionsConnectorsManagerClient");
+                return;
+            }
+
+            SkipperPlugin.Logger.LogDebug($"Resolved underlying quest controller type to {_underlyingQuestControllerType.FullName}");
+        }
+        
+        private static void SetConditionCurrentValue(QuestController questController, Quest quest, Condition condition)
+        {
+            var conditionControllerField = questController.GetType()
+                .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(field =>
+                    field.FieldType.IsGenericType &&
+                    field.FieldType.GetGenericTypeDefinition() == _underlyingQuestControllerType
+                );
+
+            if (conditionControllerField == null)
+            {
+                SkipperPlugin.Logger.LogError($"Failed to locate {_underlyingQuestControllerType.Name} field on {questController.GetType().Name}");
+                return;
+            }
+
+            var conditionController = conditionControllerField.GetValue(questController);
+            AccessTools.Method(conditionController.GetType(), "SetConditionCurrentValue")?.Invoke(
+            conditionController,
+            [
+                quest,
+                EQuestStatus.AvailableForFinish,
+                condition,
+                condition.value,
+                true
+            ]);
         }
     }
 }

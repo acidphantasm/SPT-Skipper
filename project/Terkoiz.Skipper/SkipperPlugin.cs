@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Terkoiz.Skipper
 {
-    [BepInPlugin("com.terkoiz.skipper", "Terkoiz.Skipper", "1.1.4")]
+    [BepInPlugin("com.terkoiz.skipper", "Terkoiz.Skipper", "1.1.5")]
     public class SkipperPlugin : BaseUnityPlugin
     {
         internal const string SkipButtonName = "SkipButton";
